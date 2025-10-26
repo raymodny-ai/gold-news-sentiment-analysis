@@ -1,0 +1,72 @@
+# Database Migrations with Alembic
+
+This directory contains database migration scripts managed by Alembic.
+
+## Setup
+
+1. Install dependencies:
+   ```bash
+   pip install alembic sqlalchemy
+   ```
+
+2. Initialize Alembic (if not already done):
+   ```bash
+   alembic init alembic
+   ```
+
+3. Update `alembic.ini` with your database URL:
+   ```ini
+   sqlalchemy.url = postgresql://username:password@localhost:5432/gold_news_db
+   ```
+
+4. Generate initial migration:
+   ```bash
+   alembic revision --autogenerate -m "Initial migration"
+   ```
+
+## Usage
+
+### Create a new migration
+```bash
+alembic revision --autogenerate -m "Description of changes"
+```
+
+### Apply migrations
+```bash
+alembic upgrade head
+```
+
+### Rollback migrations
+```bash
+alembic downgrade -1  # Rollback one revision
+alembic downgrade base  # Rollback all migrations
+```
+
+### Check current revision
+```bash
+alembic current
+```
+
+### Show migration history
+```bash
+alembic history
+```
+
+### Show migration details
+```bash
+alembic show <revision_id>
+```
+
+## Migration Structure
+
+Each migration file contains:
+- `upgrade()`: Functions to apply the migration
+- `downgrade()`: Functions to reverse the migration
+
+## Best Practices
+
+1. Always use `--autogenerate` when creating new migrations
+2. Review generated migrations before applying
+3. Test migrations on a copy of production data
+4. Never modify existing migration files
+5. Use descriptive migration messages

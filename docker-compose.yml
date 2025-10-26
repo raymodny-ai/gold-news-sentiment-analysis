@@ -1,0 +1,171 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:13-alpine
+    environment:
+      POSTGRES_DB: gold_news_db
+      POSTGRES_USER: gold_user
+      POSTGRES_PASSWORD: gold_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - gold_news_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gold_user -d gold_news_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Redis Cache and Message Broker
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - gold_news_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    environment:
+      - DATABASE_URL=postgresql://gold_user:gold_password@postgres:5432/gold_news_db
+      - REDIS_URL=redis://redis:6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DEBUG=False
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gold_news_network
+    volumes:
+      - ./models:/home/app/models
+      - ./logs:/home/app/logs
+    restart: unless-stopped
+
+  # Dashboard Service
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dashboard
+    environment:
+      - API_HOST=api
+      - API_PORT=8000
+      - API_VERSION=v1
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    networks:
+      - gold_news_network
+    restart: unless-stopped
+
+  # Celery Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    environment:
+      - DATABASE_URL=postgresql://gold_user:gold_password@postgres:5432/gold_news_db
+      - REDIS_URL=redis://redis:6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gold_news_network
+    volumes:
+      - ./models:/home/app/models
+      - ./logs:/home/app/logs
+    restart: unless-stopped
+    command: ["celery", "-A", "app.tasks.celery_config", "worker", "--loglevel=info", "--concurrency=2"]
+
+  # Celery Beat Scheduler
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: beat
+    environment:
+      - DATABASE_URL=postgresql://gold_user:gold_password@postgres:5432/gold_news_db
+      - REDIS_URL=redis://redis:6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gold_news_network
+    volumes:
+      - ./logs:/home/app/logs
+    restart: unless-stopped
+
+  # Flower (Celery Monitoring)
+  flower:
+    image: mher/flower:0.9.7
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_PORT=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    networks:
+      - gold_news_network
+    restart: unless-stopped
+
+  # Nginx (Reverse Proxy)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./ssl:/etc/ssl:ro
+    depends_on:
+      - api
+      - dashboard
+    networks:
+      - gold_news_network
+    restart: unless-stopped
+
+networks:
+  gold_news_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
